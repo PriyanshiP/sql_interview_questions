@@ -1,0 +1,118 @@
+
+
+select cast(a.created AS DATE) AS Week_Start_Date,  -----1st week in which the user placed the order from table a
+
+sum(case when cast(b.created AS DATE) between cast(a.created AS DATE) AND dateadd(DD, 7, cast(a.created AS DATE)) THEN 1  else 0 end) AS 'Week_0',
+
+sum(case when cast(created AS DATE) between dateadd(DD, 7, cast(created AS DATE)) AND dateadd(DD, 14, cast(created AS DATE)) THEN 1  else 0 end) AS 'Week_1',
+
+sum(case when cast(created AS DATE) between dateadd(DD, 14, cast(created AS DATE)) AND dateadd(DD, 21, cast(created AS DATE)) THEN 1  else 0 end) AS 'Week_2',
+
+sum(case when cast(created AS DATE) between dateadd(DD, 21, cast(created AS DATE)) AND dateadd(DD, 28, cast(created AS DATE)) THEN 1  else 0 end) AS 'Week_3',
+
+sum(case when cast(created AS DATE) between dateadd(DD, 28, cast(created AS DATE)) AND dateadd(DD, 35, cast(created AS DATE)) THEN 1  else 0 end) AS 'Week_4',
+
+sum(case when cast(created AS DATE) between dateadd(DD, 35, cast(created AS DATE)) AND dateadd(DD, 42, cast(created AS DATE)) THEN 1  else 0 end) AS 'Week_5',
+
+sum(case when cast(created AS DATE) between dateadd(DD, 42, cast(created AS DATE)) AND dateadd(DD, 49, cast(created AS DATE)) THEN 1  else 0 end) AS 'Week_6',
+
+sum(case when cast(created AS DATE) between dateadd(DD, 49, cast(created AS DATE)) AND dateadd(DD, 56, cast(created AS DATE)) THEN 1  else 0 end) AS 'Week_7',
+
+sum(case when cast(created AS DATE) between dateadd(DD, 56, cast(created AS DATE)) AND dateadd(DD, 63, cast(created AS DATE)) THEN 1  else 0 end) AS 'Week_8',
+
+sum(case when cast(created AS DATE) between dateadd(DD, 63, cast(created AS DATE)) AND dateadd(DD, 70, cast(created AS DATE)) THEN 1  else 0 end) AS 'Week_9',
+
+sum(case when cast(created AS DATE) between dateadd(DD, 70, cast(created AS DATE)) AND dateadd(DD, 77, cast(created AS DATE)) THEN 1  else 0 end) AS 'Week_10',
+
+FROM
+(
+select 
+cast(created AS DATE) AS first_order_date, --------pulling the first orders for a user
+User_id
+FROM 
+(
+  select User_id,created,row_number() over (partition by user_id ORDER BY created) AS rnk FROM Order Table
+) x
+WHERE rnk=1
+) a
+LEFT JOIN
+(
+  select 
+  cast(created AS DATE) AS order_date, ---------pulling the remaining orders for a user
+  User_id
+  FROM Order Table
+) b
+ON A.user_id = B.user_id
+group by cast(a.created AS DATE)
+
+---------------------------------------------------------------------
+SELECT y.dispatch_bucket,order_count *100/SUM(order_count) OVER (ORDER BY order_count) AS total_order_count -----calculating %
+from
+(
+select dispatch_bucket, COUNT(x.order_id) AS order_count -------subquery fetching bucketwise order counts from below
+from
+( 
+SELECT a.order_id, created,
+
+substring(message, char_index("\":\"",message),10) as promised_dispatch_date,  -----breaking the message column by identifying a pattern --> ","
+
+CASE WHEN actual_dispatch_date < CAST((substring(message, char_index("\":\"",message),10)) AS DATE) THEN 'OTIF'   ---------dispatched before promised date
+
+     WHEN actual_dispatch_date BETWEEN CAST((substring(message, char_index("\":\"",message),10)) AS DATE) AND DATEADD(DD,1,(CAST((substring(message, char_index("\":\"",message),10)) AS DATE))) < actual_dispatch_date THEN 'OTIF+1' 
+     ------ ---------dispatched within 24 hours post promised date
+
+     WHEN actual_dispatch_date BETWEEN CAST((substring(message, char_index("\":\"",message),10)) AS DATE) AND DATEADD(DD,2,(CAST((substring(message, char_index("\":\"",message),10)) AS DATE))) < actual_dispatch_date THEN 'OTIF+2' 
+      ---------dispatched within 48 hours post promised date
+
+ELSE 'OTIF>=2' ------------dispatch took more time
+END AS dispatch_bucket 
+actual_dispatch_date
+from order_timeline a
+join order_shipment b on a.order_id = b.order_id
+) as x
+group by dispatch_bucket
+) as y
+group by dispatch_bucket;
+
+
+------------------------------------------------------------------------------------------------------------------------------------
+
+3)
+
+a)select count(distinct employee_id) as num_of_employees_curr
+  from
+    (select *, row_num() over (partition by employee_id order by created desc) as last_activity   ---------- descending gives us 'out' on first ranking as 1
+    from records) as a
+  where last_activity = 1 and action = "in" and created <= current_timestamp(); -----checks if employee is inside or not through last activity condition
+
+
+b) select count(distinct employee_id) as num_of_employees_curr
+  from
+    (select *, row_num() over (partition by employee_id order by created desc) as last_activity   ---------- refer comments above
+    from records) as a
+  where last_activity = 1 and action = "in" and created <= "2019-05-01 19:05:00";
+
+
+c)select employee_id, sum(difference) as total_hours_spent
+  from
+  ( SELECT employee_id, action,  
+    DATEDIFF(hour,LAG(created) OVER (partition by employee_id ORDER BY created), created) as difference -----lag functions picks up the immediate date pairing next
+    FROM records1
+    WHERE LAG(created) OVER (ORDER BY created) IS NOT NULL ) -----to prevent error where lag finds null in the end
+  where action = "In"  ------the trick is to make the best use of lag, hereby removing the unwanted differences of out and in pairs
+  group by employee_id;
+
+d)select employee_id, sum(difference) as total_hours_spent
+  from
+  ( SELECT employee_id, action,  
+    DATEDIFF(hour,LAG(created) OVER (partition by employee_id ORDER BY created), created) as difference -----refer comments in the above query
+    FROM records1
+    WHERE (LAG(created) OVER (ORDER BY created) IS NOT NULL)
+    AND (created between "2019-04-01 14:00:00" and "2019-04-02 10:00:00") 
+  )
+  where action = "In" 
+  group by employee_id;
+  
+
+
+
